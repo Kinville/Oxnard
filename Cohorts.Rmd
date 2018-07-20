@@ -1,0 +1,164 @@
+---
+title: "Oxnard Data Cleaning and Cohort Grouping"
+author: "Ryan Kinville"
+date: "July 2018"
+output:
+  html_document:
+    df_print: paged
+  html_notebook: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+
+library(tidyverse)
+library(fs)
+library(googlesheets)
+library(readxl)
+library(janitor)
+library(cellranger)
+library(visdat)
+library(skimr)
+library(naniar)
+library(knitr)
+
+```
+
+
+```{r, include=FALSE}
+
+
+# 2014-2015
+
+a14 <- gs_title("attendance 1415.csv") %>% gs_read() %>% clean_names()
+
+res14 <- bind_cols((gs_read(gs_title("CAASPP14-15.xlsx"), range = cell_cols(1:10)) %>% remove_empty(which = "rows")),
+            (gs_read(gs_title("CAASPP14-15.xlsx"), range = cell_cols(11:13), skip = 2) %>% remove_empty(which = "rows"))) %>% 
+  clean_names() %>% 
+  rename("local_stu_id" = "student_id")
+
+both14 <- full_join(a14,res14,by = "local_stu_id") %>% mutate(school_year = "14-15")
+
+
+# 2015-2016
+
+a15 <- gs_title("attendance 1516.csv") %>% gs_read() %>% clean_names()
+
+res15 <- bind_cols((gs_read(gs_title("CAASPP15-16.xlsx"), range = cell_cols(1:10)) %>% remove_empty(which = "rows")),
+            (gs_read(gs_title("CAASPP15-16.xlsx"), range = cell_cols(11:13), skip = 2) %>% remove_empty(which = "rows"))) %>% 
+  clean_names() %>% 
+  rename("local_stu_id" = "student_id")
+
+both15 <- full_join(a15,res15,by = "local_stu_id") %>% mutate(school_year = "15-16")
+
+
+# 2016-2017
+
+a16 <- gs_title("attendance 1617.csv") %>% gs_read() %>% clean_names()
+
+res16 <- bind_cols((gs_read(gs_title("CAASPP16-17.xlsx"), range = cell_cols(1:10)) %>% remove_empty(which = "rows")),
+            (gs_read(gs_title("CAASPP16-17.xlsx"), range = cell_cols(11:13), skip = 2) %>% remove_empty(which = "rows"))) %>% 
+  clean_names() %>% 
+  rename("local_stu_id" = "student_id")
+
+both16 <- full_join(a16,res16,by = "local_stu_id") %>% mutate(school_year = "16-17")
+
+
+# Long Data
+
+long14to17 <- bind_rows(both14,both15,both16) %>%  replace_with_na(replace = list(language_fluency = "Unknown"))
+
+
+# Grade Data
+
+grades <- read.csv(path_expand("~/Desktop/grades_by_school_year.csv")) %>% 
+  mutate(grade = as.character(grade),
+         grade =  if_else(grade=="-6", "Infant", 
+                  if_else(grade=="-3" | grade=="-4" | grade=="-5" | grade=="PreSchool", "Pre", grade))) %>% 
+  rename(school_year = schoolyears,
+         local_stu_id = ident)
+
+# hmm <- left_join(long14to17,grades,by = c("local_stu_id", "school_year"))
+# 
+# hmm1 <- hmm %>% filter(grade.x!=grade.y & !is.na(grade.x))
+
+oxnard <- left_join(long14to17,grades,by = c("local_stu_id", "school_year")) %>% 
+  mutate(grade.x = as.character(grade.x),
+         grade = if_else(is.na(grade.y), as.character(grade.x), as.character(grade.y))) %>% 
+  .[, ! names(.) %in% c("grade.x","grade.y"), drop = F]
+
+write_rds(oxnard, path_expand("~/Desktop/oxnard.rds"))
+
+```
+
+```{r, include=FALSE}
+
+cohortitize <- function(x) {
+  wip <- oxnard %>% 
+    mutate(grade =  if_else(grade=="K", "0", grade)) %>% 
+    filter(grade<="4") %>% 
+    .[, ! names(.) %in% c("tran_type","exempt"), drop = F]
+  c1 <- wip %>%
+    filter(school_year=="14-15" & grade==(5-x)) %>% 
+    transmute(n_basic_data = sum(!is.na(first_name)),
+             n_test_scores = sum(!is.na(level)),
+             n_attendance = sum(!is.na(pres)),
+             n_lang = sum(!is.na(language_fluency)),
+             n = NROW(.),
+             n_no_missing = sum(complete.cases(.))) %>% 
+    distinct() %>% 
+    mutate(school_year = "14-15",
+           grade = (5-x))
+  c2 <- wip %>%
+    filter(school_year=="15-16" & grade==(6-x)) %>% 
+    transmute(n_basic_data = sum(!is.na(first_name)),
+             n_test_scores = sum(!is.na(level)),
+             n_attendance = sum(!is.na(pres)),
+             n_lang = sum(!is.na(language_fluency)),
+             n = NROW(.),
+             n_no_missing = sum(complete.cases(.))) %>% 
+    distinct() %>% 
+    mutate(school_year = "15-16",
+           grade = (6-x))
+  c3 <- wip %>%
+    filter(school_year=="16-17" & grade==(7-x)) %>% 
+    transmute(n_basic_data = sum(!is.na(first_name)),
+             n_test_scores = sum(!is.na(level)),
+             n_attendance = sum(!is.na(pres)),
+             n_lang = sum(!is.na(language_fluency)),
+             n = NROW(.),
+             n_no_missing = sum(complete.cases(.))) %>% 
+    distinct() %>% 
+    mutate(school_year = "16-17",
+           grade = (7-x))
+  c4 <- bind_rows(c1,c2,c3) %>% 
+    mutate(cohort = x)
+  answer <- c4[c(9,7:8,5:6,1:4)]
+  return(answer)
+}
+
+c1 <- cohortitize(1)
+c2 <- cohortitize(2)
+c3 <- cohortitize(3)
+c4 <- cohortitize(4)
+c5 <- cohortitize(5)
+c6 <- cohortitize(6)
+c7 <- cohortitize(7)
+
+cohortscompiled <- bind_rows(c1,c2,c3,c4,c5,c6,c7)
+
+goodcohorts <- bind_rows(c5,c6,c7)
+
+write_rds(cohortscompiled, path_expand("~/Desktop/cohorts.rds"))
+
+```
+
+
+```{r results = 'asis'}
+
+knitr::kable(cohortscompiled)
+
+kable(goodcohorts)
+
+```
+
