@@ -21,6 +21,7 @@ library(visdat)
 library(skimr)
 library(naniar)
 library(knitr)
+library(ggplot2)
 
 ```
 
@@ -151,7 +152,46 @@ goodcohorts <- bind_rows(c5,c6,c7)
 
 write_rds(cohortscompiled, path_expand("~/Desktop/cohorts.rds"))
 
+
+
+gc1 <- oxnard %>%
+  filter(school_year=="14-15" & grade=="K") %>% 
+  mutate(cohort = 1)
+gc2 <- oxnard %>%
+  filter(school_year=="15-16" & grade=="1") %>% 
+  mutate(cohort = 1)
+gc3 <- oxnard %>%
+  filter(school_year=="16-17" & grade=="2") %>% 
+  mutate(cohort = 1)
+gc4 <- oxnard %>%
+  filter(school_year=="15-16" & grade=="K") %>% 
+  mutate(cohort = 2)
+gc5 <- oxnard %>%
+  filter(school_year=="16-17" & grade=="1") %>% 
+  mutate(cohort = 2)
+gc6 <- oxnard %>%
+  filter(school_year=="16-17" & grade=="K") %>% 
+  mutate(cohort = 3)
+
+testox <- oxnard %>%
+  filter(grade=="4")
+
+gcfull <- bind_rows(gc1,gc2,gc3,gc4,gc5,gc6)
+
+vis_dat(gcfull,warn_large_data = FALSE)
+
+vis_dat(testox,warn_large_data = F)
+
+gcfull %>% count(grade)
+
+gcfull <- gcfull %>% 
+  mutate(grade = fct_relevel(grade, c("K", "1", "2")))
+
+write_rds(gcfull, path_expand("~/Desktop/gcfull.rds"))
+
+
 ```
+
 
 
 ```{r results = 'asis'}

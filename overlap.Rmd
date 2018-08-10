@@ -1,0 +1,73 @@
+---
+title: "Oxnard Data / First 5 Data Overlap"
+author: "Ryan Kinville"
+date: "August 2018"
+output:
+  html_document:
+    df_print: paged
+  html_notebook: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+
+library(tidyverse)
+library(fs)
+library(googlesheets)
+library(readxl)
+library(janitor)
+library(cellranger)
+library(visdat)
+library(skimr)
+library(naniar)
+library(knitr)
+library(ggplot2)
+library(scales)
+library(lubridate)
+
+library(stringr)
+
+```
+
+```{r}
+
+# Upload First5 Data
+
+serv <- gs_url("https://docs.google.com/spreadsheets/d/1P-6nDO0J3KdUBaF1MzWv5rtIIn5WAUwCWZoUHKn-Qxs/edit#gid=1694710406") %>% gs_read(., range = cell_cols(1:5))
+
+distinctrowstotal <- read_rds(path_expand("~/destop/distinctrowstotal.rds")) # Doesn't work for some reason. I open manually.
+
+# Join
+
+joined <- left_join(distinctrowstotal,serv,by="ClientID") %>% 
+  clean_names() %>% 
+  mutate(mname = toupper(paste(last_name , first_name)),
+         dob = parse_date_time(mdy(dob), "ymd"))
+
+distnames <- joined %>% distinct()
+
+gcfuller %>% summary()
+
+# Upload Cohort Data
+
+gcfuller <- read_rds(path_expand("~/Desktop/cleangcfuller.rds"))
+
+# Join
+
+namematch <- left_join(gcfuller,joined,by = "mname")
+
+# Get rid of trash dumb duplicates
+
+overlap <- namematch %>% 
+  distinct()
+
+vis_dat(overlap, warn_large_data = F)
+
+vis_dat(gcfuller, warn_large_data = F)
+
+overlap %>% 
+  filter(is.na(service_modality))
+
+
+
+```

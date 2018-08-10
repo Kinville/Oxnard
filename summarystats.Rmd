@@ -1,0 +1,686 @@
+---
+title: "Oxnard Data Summary Statistics"
+author: "Ryan Kinville"
+date: "August 2018"
+output:
+  html_document:
+    df_print: paged
+  html_notebook: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+
+library(tidyverse)
+library(fs)
+library(googlesheets)
+library(readxl)
+library(janitor)
+library(cellranger)
+library(visdat)
+library(skimr)
+library(naniar)
+library(knitr)
+library(ggplot2)
+library(scales)
+
+
+library(stringr)
+
+```
+
+```{r data fixin, include=FALSE}
+
+gcfull <- read_rds(path_expand("~/Desktop/gcfull.rds")) %>% 
+  mutate(grade = fct_relevel(grade, c("K", "1", "2")))
+
+i <- 1
+
+while (i <= 3) {
+meantime <- gs_title("First5_report.xlsx") %>% 
+  gs_read(ws=i) %>% 
+  rename(local_stu_id = studentID) %>% 
+  clean_names() %>% 
+  mutate(mname = toupper(paste(lastname , firstname)))
+assign(paste0("new", as.character(i)), meantime)
+i <- (i + 1)
+}
+
+super <- left_join(gcfull,new1,by = c("mname", "local_stu_id")) %>% 
+  remove_empty("cols")
+super1 <- left_join(super,new2,by = c("mname", "local_stu_id"))
+
+gcfuller <- left_join(super1,new3,by = c("mname", "local_stu_id")) %>% 
+  replace_with_na(replace = list(preschool_stat = "N/A")) %>% 
+  separate(parentedlvl, c("parentshort","parentedlvl"), sep = "\\ - ") %>% 
+  mutate(parentedlvl = fct_relevel(parentedlvl, c("Graduate School/Post Grad", "College Grad", "Some College (inc AA)", "High School Grad", "Not a high schl grad", "Declined to state or unknow")))
+
+
+# Clean SPED
+
+gcfuller_old <- gcfuller
+
+speds <- gcfuller[58:66]
+spedend <- gcfuller[,c(7,22)]
+
+i = 1
+
+while(i <= 9) {
+step <- speds[i]
+meantime <- step %>% 
+  separate(paste0("spechist",as.character(i)), c(paste0("sped",as.character(i)),paste0("speddate",as.character(i))), sep = "\\, Entry Date: ") %>% 
+  separate(paste0("sped",as.character(i)), c(paste0("sped",as.character(i)),paste0("spedclass",as.character(i))), sep = "\\, Class: ") %>% 
+  separate(paste0("sped",as.character(i)), c("bleh",paste0("sped",as.character(i))), sep = "\\lity: ")
+
+meantime$bleh = NULL
+
+spedend <- bind_cols(spedend,meantime[1])
+
+assign(paste0("sped", as.character(i)), meantime)
+
+i <- (i + 1)
+}
+
+# spedend$na_count <- apply(spedend, 1, function(x) sum(is.na(x)))
+
+gcfuller <- left_join(gcfuller,spedend[,1:3],by = c("mname", "local_stu_id")) %>% distinct() %>% 
+  mutate(sped = case_when(sped1 == "" ~ "Autistic",
+                          TRUE ~ sped1))
+
+
+write_rds(gcfuller, path_expand("~/Desktop/wip_after_sped.rds"))
+
+gcfuller <- read_rds(path_expand("~/Desktop/wip_after_sped.rds"))
+
+# Clean ELL
+
+ells <- gcfuller[37:40] %>% 
+  replace_with_na(replace = list(ellhist1 = "NULL",
+                                 ellhist2 = "NULL",
+                                 ellhist3 = "NULL",
+                                 ellhist4 = "NULL"))
+ellend <- gcfuller[,c(5,7,22,24)]
+
+i = 1
+
+while (i <= 4) {
+step <- ells[i]
+
+meantime <- step %>%
+  separate(paste0("ellhist",as.character(i)), c("c1", "c2", "c3", "c4","c5"), fill = "right", sep = "\\ ") %>% 
+  mutate(cc1 = case_when(c1 == "Early" ~ paste(c1,c2),
+                         TRUE ~ c1),
+         cc2 = case_when(c1 == "Early" ~ c3,
+                         TRUE ~ c2),
+         cc3 = case_when(c1 == "Early" ~ c5,
+                         TRUE ~ c4),
+         cc4 = paste(cc1, cc2, cc3, sep = " - ")) %>% 
+  separate("cc4", c(paste0("ell",as.character(i)), paste0("ellstart",as.character(i)), paste0("ellend",as.character(i))), sep = "\\ - ")
+
+goodells <- meantime[,9:11]
+
+ellend <- bind_cols(ellend,goodells[1])
+
+assign(paste0("ell", as.character(i)), goodells)
+
+i <- (i + 1)
+}
+
+ellend <- ellend %>% 
+  replace_with_na(replace = list(ell1 = "NA"))  %>% 
+  replace_with_na(replace = list(ell2 = "NA"))  %>% 
+  replace_with_na(replace = list(ell3 = "NA"))  %>% 
+  replace_with_na(replace = list(ell4 = "NA"))
+ellend$na_count <- apply(ellend, 1, function(x) sum(is.na(x)))
+
+ell <- ellend %>%
+  mutate(ell = case_when(na_count == 4 ~ "Non-ELL",
+                   TRUE ~ "ELL"))
+
+ell <- ell %>% 
+  select("local_stu_id","mname","ell")
+
+gcfuller_1 <- left_join(gcfuller,ell,by=c("local_stu_id","mname")) %>% distinct()
+
+# Clean Behavior
+
+gcfuller %>% count(behavior_hist1)
+
+behav <- gcfuller[44:51] %>% 
+  replace_with_na(replace = list(behavior_hist1 = "NULL")) %>% 
+  replace_with_na(replace = list(behavior_hist2 = "NULL")) %>% 
+  replace_with_na(replace = list(behavior_hist3 = "NULL")) %>% 
+  replace_with_na(replace = list(behavior_hist4 = "NULL")) %>%
+  replace_with_na(replace = list(behavior_hist5 = "NULL")) %>% 
+  replace_with_na(replace = list(behavior_hist6 = "NULL")) %>% 
+  replace_with_na(replace = list(behavior_hist7 = "NULL")) %>% 
+  replace_with_na(replace = list(behavior_hist8 = "NULL")) 
+
+
+behavend <- gcfuller[,c(7,22)]
+
+behavend$na_count <- apply(behav, 1, function(x) sum(is.na(x)))
+
+behavend <- behavend %>% 
+  mutate(behavior = case_when(na_count == 0 ~ "Repeated Incidents",
+                              na_count == 7 ~ "Single Incident",
+                              TRUE ~ "No Incidents"))
+
+behavend$na_count <- NULL
+
+gcfuller_2 <- left_join(gcfuller_1,behavend,by = c("mname", "local_stu_id")) %>% distinct()
+
+gcfullerclean <- gcfuller_2[,c(1:36,74:76)]
+
+write_rds(gcfullerclean, path_expand("~/Desktop/cleangcfuller.rds"))
+
+gcfuller <- read_rds(path_expand("~/Desktop/cleangcfuller.rds"))
+
+```
+
+
+
+```{r summary stats}
+
+gcfuller %>% 
+  group_by(grade, gender.x) %>% 
+  summarise(count = n()) %>% 
+  mutate(perc = count/sum(count)) %>% 
+  print() %>% 
+  ggplot(aes(x=grade, y=perc, fill=gender.x)) +
+  geom_col(position="dodge") +
+  #facet_wrap(~school_year) +
+  theme_minimal() +
+  ggtitle("Gender by Grade") +
+  labs(x = "Grade", y="Percent", fill="Gender") +
+  scale_fill_viridis_d()
+
+gcfuller %>% 
+  count(cohort,grade, gender.x) %>% 
+  print() %>% 
+  ggplot(aes(x=grade, y=n, fill=gender.x)) +
+  geom_col(position="dodge") +
+  facet_wrap(~cohort) +
+  theme_minimal() +
+  ggtitle("Gender by Grade and Cohort") +
+  labs(x = "Grade", y="Number of Students", fill="Gender") +
+  scale_fill_viridis_d()
+
+gcfuller %>% 
+  group_by(grade) %>% 
+  summarise(meandays = mean(pres, na.rm=T)) %>% 
+  print() %>%  
+  ggplot(aes(x= grade, y=meandays)) +
+  geom_col() +
+  theme_minimal() +
+  ggtitle("Mean Days Present by Grade") +
+  labs(x="Grade", y="Mean Days") +
+  scale_fill_viridis_d()
+
+
+gcfuller %>% 
+  group_by(grade) %>% 
+  summarise(percdays = mean((pres/enrl), na.rm = T)) %>% 
+  print() %>%  
+  ggplot(aes(x= grade, y=percdays)) +
+  geom_col() +
+  theme_minimal() +
+  ggtitle("Percent of Days Present by Grade") +
+  labs(x="Grade", y="Percent") +
+  scale_fill_viridis_d()
+
+
+gcfuller %>% 
+  group_by(cohort,grade) %>% 
+  summarise(percdays = mean((pres/enrl), na.rm = T)) %>% 
+  print() %>%  
+  ggplot(aes(x= grade, y=percdays)) +
+  geom_col(position="dodge") +
+  facet_wrap(~cohort) +
+  geom_col() +
+  theme_minimal() +
+  ggtitle("Percent of Days Present by Grade and Cohort") +
+  labs(x="Grade", y="Percent") +
+  scale_fill_viridis_d()
+
+
+gcfuller %>% 
+  group_by(grade) %>% 
+  summarise(meandays = mean(unexc, na.rm=T)) %>% 
+  print() %>%  
+  ggplot(aes(x= grade, y=meandays)) +
+  geom_col() +
+  theme_minimal() +
+  ggtitle("Mean Unexcused Absences by Grade") +
+  labs(x="Grade", y="Mean Unexcused Absences") +
+  scale_fill_viridis_d()
+
+
+gcfuller %>% 
+  group_by(cohort,grade) %>% 
+  summarise(percdays = mean(unexc, na.rm = T)) %>% 
+  print() %>%  
+  ggplot(aes(x= grade, y=percdays)) +
+  geom_col(position="dodge") +
+  facet_wrap(~cohort) +
+  geom_col() +
+  theme_minimal() +
+  ggtitle("Mean Unexcused Absences by Grade and Cohort") +
+  labs(x="Grade", y="Mean Unexcused Absences") +
+  scale_fill_viridis_d()
+
+
+gcfuller %>% 
+  group_by(grade, unexc) %>% 
+  ggplot(aes(x=grade, y=unexc)) +
+  geom_boxplot(notch = T) +
+  theme_minimal() +
+  ggtitle("Unexcused Absences by Grade") +
+  labs(x="Grade", y="Unexcused Absences") +
+  scale_fill_viridis_d()
+
+##
+
+gcfuller %>% 
+  group_by(grade, preschool_stat) %>% 
+  summarise(count = n()) %>% 
+  mutate(perc = count/sum(count)) %>% 
+  print() %>%  
+  ggplot(aes(x= grade, y=perc,fill=preschool_stat)) +
+  geom_col(position="dodge") +
+  theme_minimal() +
+  ggtitle("Preschool Attendance by Grade") +
+  labs(x="Grade", y="Percent",fill="Preschool")
+
+
+gcfuller %>% 
+  filter(!is.na(preschool_stat)) %>% 
+  group_by(grade, preschool_stat) %>% 
+  summarise(count = n()) %>% 
+  mutate(perc = count/sum(count)) %>%
+  print() %>%  
+  ggplot(aes(x= grade, y=perc,fill=preschool_stat)) +
+  geom_col(position="dodge") +
+  theme_minimal() +
+  ggtitle("Preschool Attendance by Grade (NA's removed)") +
+  labs(x="Grade", y="Percent",fill="Preschool") +
+  scale_fill_viridis_d()
+
+
+gcfuller %>% 
+  filter(!is.na(preschool_stat)) %>% 
+  count(cohort,grade, preschool_stat) %>% 
+  print() %>% 
+  ggplot(aes(x=grade, y=n, fill=preschool_stat)) +
+  geom_col(position="dodge") +
+  facet_wrap(~cohort) +
+  theme_minimal() +
+  ggtitle("Preschool Attendance by Grade and Cohort (NA's removed)") +
+  labs(x = "Grade", y="Number of Students", fill="Preschool") +
+  scale_fill_viridis_d()
+
+gcfuller %>% 
+  filter(!is.na(preschool_stat)) %>% 
+  group_by(grade,preschool_stat) %>% 
+  summarise(percdays = mean((pres/enrl), na.rm = T)) %>% 
+  print() %>%  
+  ggplot(aes(x= grade, y=percdays, fill=preschool_stat)) +
+  geom_col(position = "dodge") +
+  facet_wrap(~preschool_stat) +
+  theme_minimal() +
+  ggtitle("Percent of Days Present by Grade and Preschool") +
+  labs(x="Grade", y="Percent",fill="Preschool")
+
+gcfuller %>% 
+  filter(!is.na(preschool_stat)) %>% 
+  group_by(preschool_stat,grade) %>% 
+  summarise(percdays = mean(unexc, na.rm = T)) %>% 
+  print() %>%  
+  ggplot(aes(x= grade, y=percdays, fill=preschool_stat)) +
+  geom_col(position="dodge") +
+  facet_wrap(~preschool_stat) +
+  geom_col() +
+  theme_minimal() +
+  ggtitle("Mean Unexcused Absences by Grade and Preschool") +
+  labs(x="Grade", y="Mean Unexcused Absences",fill="Preschool")
+
+##
+
+gcfuller %>% 
+  filter(!is.na(parentedlvl)) %>% 
+  group_by(grade, parentedlvl) %>% 
+  summarise(count = n()) %>% 
+  mutate(perc = count/sum(count)) %>% 
+  print() %>%  
+  ggplot(aes(x= grade, y=perc,fill=parentedlvl)) +
+  geom_col(position="dodge") +
+  theme_minimal() +
+  ggtitle("Parent Education by Grade") +
+  labs(x="Grade", y="Percent",fill="Parent Education") +
+  scale_fill_viridis_d()
+
+gcfuller %>% 
+  group_by(grade, pres, parentedlvl) %>% 
+  print %>% 
+  ggplot(aes(x=parentedlvl, y=pres)) +
+  geom_boxplot(notch = T) +
+  facet_wrap(~grade) +
+  theme_minimal() +
+  ggtitle("Percent Days Present by Grade and Parent Education") +
+  labs(x="Parent Education", y="Percent") +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1)) +
+  theme(plot.margin=unit(c(0.5,1,.75,1.2),"cm"))
+
+gcfuller %>% 
+  filter(!is.na(parentedlvl)) %>% 
+  group_by(parentedlvl) %>% 
+  summarise(percdays = mean(unexc, na.rm = T)) %>% 
+  print() %>%  
+  ggplot(aes(x= parentedlvl, y=percdays, fill=parentedlvl)) +
+  geom_col(position="dodge") +
+  theme_minimal() +
+  ggtitle("Mean Unexcused Absences by Parent Education") +
+  labs(x="Parent Education", y="Mean Unexcused Absences",fill="Parent Education") +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1)) +
+  theme(plot.margin=unit(c(0.5,1,.75,1.2),"cm"))
+
+gcfuller %>% 
+  filter(!is.na(parentedlvl)) %>% 
+  group_by(parentedlvl,grade) %>% 
+  summarise(percdays = mean(unexc, na.rm = T)) %>% 
+  print() %>%  
+  ggplot(aes(x= grade, y=percdays, fill=parentedlvl)) +
+  geom_col(position="dodge") +
+  theme_minimal() +
+  ggtitle("Mean Unexcused Absences by Grade and Parent Education") +
+  labs(x="Grade", y="Mean Unexcused Absences",fill="Parent Education")
+
+gcfuller %>% 
+  group_by(unexc, parentedlvl) %>% 
+  print() %>% 
+  ggplot(aes(x=parentedlvl, y=unexc)) +
+  geom_boxplot(notch = T) +
+  theme_minimal() +
+  ggtitle("Unexcused Absences by Parent Education") +
+  labs(x="Parent Education", y="Unexcused Absences") +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1)) +
+  theme(plot.margin=unit(c(0.5,1,.75,1.2),"cm"))
+
+gcfuller %>% 
+  group_by(grade, ethnicity) %>% 
+  summarise(count = n()) %>% 
+  mutate(perc = count/sum(count)) %>% 
+  print() %>% 
+  ggplot(aes(x=grade, y=perc, fill=ethnicity)) +
+  geom_col(position="dodge") +
+  #facet_wrap(~school_year) +
+  theme_minimal() +
+  ggtitle("Ethnicity by Grade") +
+  labs(x = "Grade", y="Percent", fill="Ethnicity") +
+  scale_fill_viridis_d()
+
+race <- gcfuller %>%count(race)
+
+gcfuller %>% 
+  count(cohort,grade, ethnicity) %>% 
+  print() %>% 
+  ggplot(aes(x=grade, y=n, fill=ethnicity)) +
+  geom_col(position="dodge") +
+  facet_wrap(~cohort) +
+  theme_minimal() +
+  ggtitle("Ethnicity by Grade and Cohort") +
+  labs(x = "Grade", y="Number of Students", fill="Ethnicity") +
+  scale_fill_viridis_d()
+
+gcfuller %>% 
+  group_by(grade, pres, ethnicity) %>% 
+  print %>% 
+  ggplot(aes(x=ethnicity, y=pres)) +
+  geom_boxplot(notch = T) +
+  facet_wrap(~grade) +
+  theme_minimal() +
+  ggtitle("Days Present by Ethnicity and Grade") +
+  labs(x="Ethnicity", y="Days Present")
+
+#####
+
+gcfuller %>% 
+  filter(!is.na(ethnicity)) %>% 
+  group_by(ethnicity) %>% 
+  summarise(percdays = mean(unexc, na.rm = T)) %>% 
+  print() %>%  
+  ggplot(aes(x= ethnicity, y=percdays, fill=ethnicity)) +
+  geom_col(position="dodge") +
+  theme_minimal() +
+  ggtitle("Mean Unexcused Absences by Ethnicity") +
+  labs(x="Ethnicity", y="Mean Unexcused Absences",fill="Ethnicity")
+
+gcfuller %>% 
+  group_by(grade, race) %>% 
+  summarise(count = n()) %>% 
+  mutate(perc = count/sum(count)) %>% 
+  print() %>% 
+  ggplot(aes(x=grade, y=perc, fill=race)) +
+  geom_col(position="dodge") +
+  #facet_wrap(~school_year) +
+  theme_minimal() +
+  ggtitle("Race by Grade") +
+  labs(x = "Grade", y="Percent", fill="Race") +
+  scale_fill_viridis_d()
+
+gcfuller %>% 
+  count(cohort,grade, race) %>% 
+  print() %>% 
+  ggplot(aes(x=grade, y=n, fill=race)) +
+  geom_col(position="dodge") +
+  facet_wrap(~cohort) +
+  theme_minimal() +
+  ggtitle("Gender by Grade and Cohort") +
+  labs(x = "Grade", y="Number of Students", fill="Race") +
+  scale_fill_viridis_d()
+
+gcfuller %>% 
+  group_by(grade, pres, race) %>% 
+  print %>% 
+  ggplot(aes(x=race, y=pres)) +
+  geom_boxplot(notch = T) +
+  facet_wrap(~grade) +
+  theme_minimal() 
+
+gcfuller %>% 
+  filter(!is.na(race)) %>% 
+  group_by(race) %>% 
+  summarise(percdays = mean(unexc, na.rm = T)) %>% 
+  print() %>%  
+  ggplot(aes(x= race, y=percdays, fill=race)) +
+  geom_col(position="dodge") +
+  theme_minimal() +
+  ggtitle("Mean Unexcused Absences by Race") +
+  labs(x="Race", y="Mean Unexcused Absences",fill="Race")
+
+gcfuller %>% 
+  group_by(grade, sped) %>% 
+  summarise(count = n()) %>% 
+  mutate(perc = count/sum(count)) %>% 
+  print() %>% 
+  ggplot(aes(x=grade, y=perc, fill=sped)) +
+  geom_col(position="dodge") +
+  #facet_wrap(~school_year) +
+  theme_minimal() +
+  ggtitle("Special Education by Grade") +
+  labs(x = "Grade", y="Percent", fill="Special Education")
+
+gcfuller %>% 
+  filter(!is.na(sped)) %>% 
+  group_by(grade, sped) %>% 
+  summarise(count = n()) %>% 
+  mutate(perc = count/sum(count)) %>% 
+  print() %>% 
+  ggplot(aes(x=grade, y=perc, fill=sped)) +
+  geom_col(position="dodge") +
+  #facet_wrap(~school_year) +
+  theme_minimal() +
+  ggtitle("Special Education by Grade") +
+  labs(x = "Grade", y="Percent", fill="Special Education")
+
+gcfuller %>% 
+  mutate(sped_n = case_when(is.na(sped) ~ "Not SPED",
+                           TRUE ~ "SPED")) %>% 
+  group_by(grade, sped_n) %>% 
+  summarise(count = n()) %>% 
+  mutate(perc = count/sum(count)) %>% 
+  print() %>% 
+  ggplot(aes(x=grade, y=perc, fill=sped_n)) +
+  geom_col(position="dodge") +
+  #facet_wrap(~school_year) +
+  theme_minimal() +
+  ggtitle("Special Education by Grade") +
+  labs(x = "Grade", y="Percent", fill="Special Education")
+
+gcfuller %>% 
+  mutate(sped_n = case_when(is.na(sped) ~ "Not SPED",
+                           TRUE ~ "SPED")) %>% 
+  count(cohort,grade,sped_n) %>% 
+  print() %>% 
+  ggplot(aes(x=grade, y=n, fill=sped_n)) +
+  geom_col(position="dodge") +
+  facet_wrap(~cohort) +
+  theme_minimal() +
+  ggtitle("Special Education by Grade and Cohort") +
+  labs(x = "Grade", y="Number of Students", fill="Special Education") +
+  scale_fill_viridis_d()
+
+gcfuller %>% 
+  mutate(sped_n = case_when(is.na(sped) ~ "Not SPED",
+                           TRUE ~ "SPED")) %>% 
+  group_by(grade,sped_n) %>% 
+  summarise(percdays = mean((pres/enrl), na.rm = T)) %>% 
+  print() %>%  
+  ggplot(aes(x= grade, y=percdays, fill=sped_n)) +
+  geom_col(position = "dodge") +
+  facet_wrap(~sped_n) +
+  theme_minimal() +
+  ggtitle("Percent of Days Present by Grade and Special Education") +
+  labs(x="Grade", y="Percent",fill="Special Education")  +
+  scale_fill_viridis_d()
+
+gcfuller %>% 
+  mutate(sped_n = case_when(is.na(sped) ~ "Not SPED",
+                           TRUE ~ "SPED")) %>% 
+  group_by(sped_n,grade) %>% 
+  summarise(percdays = mean(unexc, na.rm = T)) %>% 
+  print() %>%  
+  ggplot(aes(x= grade, y=percdays, fill=sped_n)) +
+  geom_col(position="dodge") +
+  facet_wrap(~sped_n) +
+  geom_col() +
+  theme_minimal() +
+  ggtitle("Mean Unexcused Absences by Grade and Special Education") +
+  labs(x="Grade", y="Mean Unexcused Absences",fill="Special Education")
+
+gcfuller %>%
+  group_by(grade, ell) %>%
+  summarise(count = n()) %>%
+  mutate(perc = count/sum(count)) %>%
+  print() %>%
+  ggplot(aes(x=grade, y=perc, fill=ell)) +
+  geom_col(position="dodge") +
+  #facet_wrap(~school_year) +
+  theme_minimal() +
+  ggtitle("English Language Learners by Grade") +
+  labs(x = "Grade", y="Percent", fill="English Leaner")  +
+  scale_fill_viridis_d()
+
+gcfuller %>% 
+  count(cohort,grade, ell) %>% 
+  print() %>% 
+  ggplot(aes(x=grade, y=n, fill=ell)) +
+  geom_col(position="dodge") +
+  facet_wrap(~cohort) +
+  theme_minimal() +
+  ggtitle("English Language Learners by Grade and Cohort") +
+  labs(x = "Grade", y="Number of Students", fill="English Learner") +
+  scale_fill_viridis_d()
+
+gcfuller %>% 
+  group_by(grade,ell) %>% 
+  summarise(percdays = mean((pres/enrl), na.rm = T)) %>% 
+  print() %>%  
+  ggplot(aes(x= grade, y=percdays, fill=ell)) +
+  geom_col(position = "dodge") +
+  facet_wrap(~ell) +
+  theme_minimal() +
+  ggtitle("Percent of Days Present by Grade and ELL") +
+  labs(x="Grade", y="Percent",fill="English Learner")
+
+gcfuller %>% 
+  group_by(grade, pres, ell) %>% 
+  ggplot(aes(x=grade, y=pres)) +
+  geom_boxplot(notch = T) +
+  theme_minimal() +
+  facet_wrap(~ell) +
+  ggtitle("Days Present by Grade and ELL") +
+  labs(x="Grade", y="Unexcused Absences") +
+  scale_fill_viridis_d()
+
+gcfuller %>% 
+  group_by(ell,grade) %>% 
+  summarise(percdays = mean(unexc, na.rm = T)) %>% 
+  print() %>%  
+  ggplot(aes(x= grade, y=percdays, fill=ell)) +
+  geom_col(position="dodge") +
+  facet_wrap(~ell) +
+  geom_col() +
+  theme_minimal() +
+  ggtitle("Mean Unexcused Absences by Grade and ELL") +
+  labs(x="Grade", y="Mean Unexcused Absences",fill="English Learner")
+
+gcfuller %>% 
+  group_by(grade, unexc, ell) %>% 
+  ggplot(aes(x=grade, y=unexc)) +
+  geom_boxplot(notch = T) +
+  theme_minimal() +
+  facet_wrap(~ell) +
+  ggtitle("Unexcused Absences by Grade and ELL") +
+  labs(x="Grade", y="Unexcused Absences") +
+  scale_fill_viridis_d()
+
+gcfuller %>%
+  group_by(grade, behavior) %>%
+  summarise(count = n()) %>%
+  mutate(perc = count/sum(count)) %>%
+  print() %>%
+  ggplot(aes(x=grade, y=perc, fill=behavior)) +
+  geom_col(position="dodge") +
+  #facet_wrap(~school_year) +
+  theme_minimal() +
+  ggtitle("Behavioral Incidents by Grade") +
+  labs(x = "Grade", y="Percent", fill="Behavior")  +
+  scale_fill_viridis_d()
+
+gcfuller %>%
+  filter(behavior != "No Incidents") %>% 
+  group_by(grade, behavior) %>%
+  summarise(count = n()) %>%
+  print() %>%
+  ggplot(aes(x=grade, y=count, fill=behavior)) +
+  geom_col(position="dodge") +
+  #facet_wrap(~school_year) +
+  theme_minimal() +
+  ggtitle("Behavioral Incidents by Grade (Clean Records Removed)") +
+  labs(x = "Grade", y="Number of Incidents", fill="Behavior")  +
+  scale_fill_viridis_d()
+
+gcfuller %>% 
+  filter(behavior != "No Incidents") %>% 
+  count(cohort,grade, behavior) %>% 
+  print() %>% 
+  ggplot(aes(x=grade, y=n, fill=behavior)) +
+  geom_col(position="dodge") +
+  facet_wrap(~cohort) +
+  theme_minimal() +
+  ggtitle("Behavioral Incidents by Grade and Cohort (Clean Records Removed)") +
+  labs(x = "Grade", y="Number of Students", fill="Behavior") +
+  scale_fill_viridis_d()
+
+```
